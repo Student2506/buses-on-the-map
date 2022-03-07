@@ -17,20 +17,37 @@ TEMPLATE = {
 
 
 async def browser_responder(request):
+    route = browser_responder.params
+
     ws = await request.accept()
     while True:
         try:
-            # message = await ws.get_message()
-            message = json.loads(TEMPLATE)
-            await ws.send_message(message)
+            for coords in route['coordinates']:
+                TEMPLATE['buses'] = [
+                    {
+                        'busId': route['name'],
+                        'lat': coords[0],
+                        'lng': coords[1],
+                        'route': str(route['name'])
+                    }
+                ]
+                message = json.dumps(TEMPLATE)
+                await ws.send_message(message)
+                await trio.sleep(1)
         except ConnectionClosed:
             break
+        await trio.sleep(1)
 
 
 async def main():
+    async with await trio.open_file('156.json', encoding='utf-8') as f:
+        route = json.loads(await f.read())
+
     logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+    responder_func = browser_responder
+    responder_func.params = route
     await serve_websocket(
-        browser_responder, '127.0.0.1', 8000, ssl_context=None
+        responder_func, '127.0.0.1', 8000, ssl_context=None
     )
 
 
