@@ -15,6 +15,7 @@ async def receive_coords_data(request):
             logger.debug(message)
         except ConnectionClosed:
             break
+        await trio.sleep(1)
 
 
 async def main():
