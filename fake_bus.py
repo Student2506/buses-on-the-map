@@ -42,6 +42,8 @@ async def main():
                 nursery.start_soon(run_bus, url, route['name'], route)
     except OSError as ose:
         logger.debug(f'Connection attempt failed: {ose}')
+    except trio.MultiError:
+        logger.debug('Server has closed connection.')
 
 
 if __name__ == '__main__':
