@@ -14,7 +14,7 @@ async def run_bus(url, bus_id, route):
         TEMPLATE = {}
         for coords in route['coordinates']:
             TEMPLATE = {
-                'busId': route['name'],
+                'busId': bus_id,
                 'lat': coords[0],
                 'lng': coords[1],
                 'route': str(route['name'])
@@ -39,7 +39,10 @@ async def main():
     try:
         async with trio.open_nursery() as nursery:
             for route in load_routes():
-                nursery.start_soon(run_bus, url, route['name'], route)
+                for i in range(1):
+                    nursery.start_soon(
+                        run_bus, url, f"{route['name']}-{str(i)}", route
+                    )
     except OSError as ose:
         logger.debug(f'Connection attempt failed: {ose}')
     except trio.MultiError:
