@@ -9,6 +9,10 @@ FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logger = logging.getLogger(__name__)
 
 
+def generate_bus_id(route_id, bus_index):
+    return f'{route_id}-{bus_index}'
+
+
 async def run_bus(url, bus_id, route):
     async with open_websocket_url(url) as ws:
         TEMPLATE = {}
