@@ -2,20 +2,29 @@ import json
 import logging
 import os
 from itertools import cycle, islice
-from random import randint
+from random import choice, randint
 
 import trio
 from trio_websocket import open_websocket_url
 
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logger = logging.getLogger(__name__)
+CHANNELS = 5
+BUSES_PER_ROUTE = 40
+
+
+async def send_updates(server_address, receive_channel):
+    async with open_websocket_url(f'ws://{server_address}:8080') as ws:
+        async for message in receive_channel:
+            await ws.send_message(message)
+            await trio.sleep(0)
 
 
 def generate_bus_id(route_id, bus_index):
     return f'{route_id}-{bus_index}'
 
 
-async def run_bus(url, bus_id, route):
+async def run_bus(bus_id, route, send_channel):
     await trio.sleep(randint(0, 5))
     coords = route['coordinates']
     checkpoint = randint(0, len(coords))
@@ -26,24 +35,22 @@ async def run_bus(url, bus_id, route):
         islice(coords, checkpoint, None)
     )
     route_current = second_part_of_route_coords + first_part_of_route_coords
-    async with open_websocket_url(url) as ws:
-        while True:
-            # route_current = route.copy()
-            TEMPLATE = {}
-            for coords in cycle(route_current):
-                TEMPLATE = {
-                    'busId': bus_id,
-                    'lat': coords[0],
-                    'lng': coords[1],
-                    'route': bus_id.split('-')[0]
-                }
+    while True:
+        TEMPLATE = {}
+        for coords in cycle(route_current):
+            TEMPLATE = {
+                'busId': bus_id,
+                'lat': coords[0],
+                'lng': coords[1],
+                'route': bus_id.split('-')[0]
+            }
 
-                message = json.dumps(TEMPLATE, ensure_ascii=False)
-                await ws.send_message(message)
-                await trio.sleep(0.01)
+            message = json.dumps(TEMPLATE, ensure_ascii=False)
+            await send_channel.send(message)
+            await trio.sleep(0)
 
 
-def load_routes(directory_path='routes'):
+async def load_routes(directory_path='routes'):
     for filename in os.listdir(directory_path):
         if filename.endswith('.json'):
             filepath = os.path.join(directory_path, filename)
@@ -52,22 +59,38 @@ def load_routes(directory_path='routes'):
 
 
 async def main():
-    url = 'ws://127.0.0.1:8080'
-    logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+    logging.basicConfig(level=logging.ERROR, format=FORMAT)
+    channels = []
+    for _ in range(CHANNELS):
+        (
+            send_channel,
+            receive_channel
+        ) = trio.open_memory_channel(0)
+        channels.append((send_channel, receive_channel))
     try:
+        routes = []
+        async for route in load_routes():
+            routes.append(route)
         async with trio.open_nursery() as nursery:
-            for route in load_routes():
-                for i in range(3):
+            for route in routes:
+                for i in range(BUSES_PER_ROUTE):
+                    send_channel, _ = choice(channels)
                     nursery.start_soon(
                         run_bus,
-                        url,
                         generate_bus_id(route['name'], i),
-                        route
+                        route,
+                        send_channel
                     )
+            for _, receive_channel in channels:
+                nursery.start_soon(
+                    send_updates,
+                    '127.0.0.1',
+                    receive_channel
+                )
     except OSError as ose:
-        logger.debug(f'Connection attempt failed: {ose}')
-    except trio.MultiError:
-        logger.debug('Server has closed connection.')
+        logger.error(f'Connection attempt failed: {ose}')
+    except trio.MultiError as e:
+        logger.error(f'Server has closed connection.: {e}')
 
 
 if __name__ == '__main__':
