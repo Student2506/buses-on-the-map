@@ -1,18 +1,35 @@
+import contextvars
 import json
 import logging
 import os
+from contextlib import suppress
+from functools import wraps
 from itertools import cycle, islice
 from random import choice, randint
 
+import asyncclick as click
 import trio
-from trio_websocket import open_websocket_url
+from trio_websocket import ConnectionClosed, open_websocket_url
 
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+REFRESH_TIMEOUT = contextvars.ContextVar('refresh_timeout')
 logger = logging.getLogger(__name__)
-CHANNELS = 5
-BUSES_PER_ROUTE = 40
 
 
+def relaunch_on_disconnect(async_function):
+    @wraps(async_function)
+    async def wrapper(*args, **kwargs):
+        while True:
+            try:
+                return await async_function(*args, **kwargs)
+            except ConnectionClosed:
+                logger.error('Connection closed')
+                await trio.sleep(10)
+
+    return wrapper
+
+
+@relaunch_on_disconnect
 async def send_updates(server_address, receive_channel):
     async with open_websocket_url(f'ws://{server_address}:8080') as ws:
         async for message in receive_channel:
@@ -24,8 +41,7 @@ def generate_bus_id(route_id, bus_index):
     return f'{route_id}-{bus_index}'
 
 
-async def run_bus(bus_id, route, send_channel):
-    await trio.sleep(randint(0, 5))
+def route_random_start(route):
     coords = route['coordinates']
     checkpoint = randint(0, len(coords))
     first_part_of_route_coords = list(
@@ -35,17 +51,23 @@ async def run_bus(bus_id, route, send_channel):
         islice(coords, checkpoint, None)
     )
     route_current = second_part_of_route_coords + first_part_of_route_coords
+    route['coordinates'] = route_current
+
+
+async def run_bus(bus_id, route, send_channel):
+    await trio.sleep(randint(0, REFRESH_TIMEOUT.get()))
+    route_random_start(route)
     while True:
-        TEMPLATE = {}
-        for coords in cycle(route_current):
-            TEMPLATE = {
+        current_position = {}
+        for coords in cycle(route['coordinates']):
+            current_position = {
                 'busId': bus_id,
                 'lat': coords[0],
                 'lng': coords[1],
                 'route': bus_id.split('-')[0]
             }
 
-            message = json.dumps(TEMPLATE, ensure_ascii=False)
+            message = json.dumps(current_position, ensure_ascii=False)
             await send_channel.send(message)
             await trio.sleep(0)
 
@@ -58,10 +80,22 @@ async def load_routes(directory_path='routes'):
                 yield json.load(f)
 
 
-async def main():
-    logging.basicConfig(level=logging.ERROR, format=FORMAT)
+@click.command()
+@click.option('--server', default='127.0.0.1')
+@click.option('--routes_number', default=10)
+@click.option('--buses_per_route', default=40)
+@click.option('--websockets_number', default=5)
+@click.option('--emulator_id', default='')
+@click.option('--refresh_timeout', default=5)
+@click.option('--v', default=logging.INFO)
+async def main(
+    server, routes_number, buses_per_route, websockets_number, emulator_id,
+    refresh_timeout, v
+):
+    logging.basicConfig(level=v, format=FORMAT)
+    REFRESH_TIMEOUT.set(refresh_timeout)
     channels = []
-    for _ in range(CHANNELS):
+    for _ in range(websockets_number):
         (
             send_channel,
             receive_channel
@@ -71,30 +105,28 @@ async def main():
         routes = []
         async for route in load_routes():
             routes.append(route)
+        routes_number = min(len(routes), routes_number)
         async with trio.open_nursery() as nursery:
-            for route in routes:
-                for i in range(BUSES_PER_ROUTE):
+            for route in routes[:routes_number]:
+                for i in range(buses_per_route):
                     send_channel, _ = choice(channels)
                     nursery.start_soon(
                         run_bus,
-                        generate_bus_id(route['name'], i),
+                        generate_bus_id(f'{emulator_id}{route["name"]}', i),
                         route,
                         send_channel
                     )
             for _, receive_channel in channels:
                 nursery.start_soon(
                     send_updates,
-                    '127.0.0.1',
+                    server,
                     receive_channel
                 )
     except OSError as ose:
         logger.error(f'Connection attempt failed: {ose}')
-    except trio.MultiError as e:
-        logger.error(f'Server has closed connection.: {e}')
-
+    # except ConnectionClosed:
+    #     logger.error('Server has closed connection.')
 
 if __name__ == '__main__':
-    try:
-        trio.run(main)
-    except KeyboardInterrupt:
-        pass
+    with suppress(KeyboardInterrupt):
+        main(_anyio_backend="trio")

@@ -1,5 +1,6 @@
 import json
 import logging
+from contextlib import suppress
 from functools import partial
 
 import trio
@@ -11,23 +12,26 @@ logger = logging.getLogger(__name__)
 
 async def collect_all_data(sending_channel, receiving_channel):
     buses = {}
+    message = None
     while True:
-        async for message in receiving_channel:
-            logger.debug(receiving_channel.statistics())
-            buses.update(message)
-            TEMPLATE = {
-                    'msgType': 'Buses',
-                    'buses': [
-                        {
-                            'busId': bus_id,
-                            'lat': bus_params['lat'],
-                            'lng': bus_params['lng'],
-                            'route': bus_params['route']
-                        } for bus_id, bus_params in buses.items()
-                    ]
-                }
-            message = json.dumps(TEMPLATE)
-            await sending_channel.send(message)
+        with trio.move_on_after(10):
+            async for message in receiving_channel:
+                logger.debug(receiving_channel.statistics())
+                buses.update(message)
+                current_position = {
+                        'msgType': 'Buses',
+                        'buses': [
+                            {
+                                'busId': bus_id,
+                                'lat': bus_params['lat'],
+                                'lng': bus_params['lng'],
+                                'route': bus_params['route']
+                            } for bus_id, bus_params in buses.items()
+                        ]
+                    }
+                message = json.dumps(current_position)
+                logger.debug(f'Buses total: {len(message)}')
+        await sending_channel.send(message)
         await trio.sleep(0)
 
 
@@ -46,6 +50,7 @@ async def talk_to_browser(receiving_channel, request):
 
 async def receive_coords_data(sending_channel, request):
     # global buses
+    sending_channel = sending_channel.clone()
     buses = {}
     ws = await request.accept()
     while True:
@@ -59,6 +64,8 @@ async def receive_coords_data(sending_channel, request):
                 'route': str(bus.get('route'))
             }
             await sending_channel.send(buses)
+            # logger.debug(buses)
+            logger.debug(f'Coords qty: {len(buses)}')
         except ConnectionClosed:
             break
         await trio.sleep(0)
@@ -108,7 +115,5 @@ async def main():
 
 
 if __name__ == '__main__':
-    try:
+    with suppress(KeyboardInterrupt):
         trio.run(main)
-    except KeyboardInterrupt:
-        pass
