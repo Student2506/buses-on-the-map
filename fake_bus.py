@@ -9,7 +9,7 @@ from random import choice, randint
 
 import asyncclick as click
 import trio
-from trio_websocket import ConnectionClosed, open_websocket_url
+from trio_websocket import ConnectionClosed, open_websocket_url, HandshakeError
 
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 REFRESH_TIMEOUT = contextvars.ContextVar('refresh_timeout')
@@ -22,10 +22,9 @@ def relaunch_on_disconnect(async_function):
         while True:
             try:
                 return await async_function(*args, **kwargs)
-            except ConnectionClosed:
+            except (ConnectionClosed, HandshakeError):
                 logger.error('Connection closed')
                 await trio.sleep(10)
-
     return wrapper
 
 

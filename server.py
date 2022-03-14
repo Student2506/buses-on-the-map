@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 async def collect_all_data(sending_channel, receiving_channel):
     buses = {}
-    message = None
+    message = ''
     while True:
         with trio.move_on_after(10):
             async for message in receiving_channel:
