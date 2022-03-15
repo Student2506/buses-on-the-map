@@ -33,7 +33,7 @@ async def send_updates(server_address, receive_channel):
     async with open_websocket_url(f'ws://{server_address}:8080') as ws:
         async for message in receive_channel:
             await ws.send_message(message)
-            await trio.sleep(0)
+            await trio.sleep(REFRESH_TIMEOUT.get())
 
 
 def generate_bus_id(route_id, bus_index):

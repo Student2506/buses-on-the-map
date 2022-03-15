@@ -14,7 +14,7 @@ async def collect_all_data(sending_channel, receiving_channel):
     buses = {}
     message = ''
     while True:
-        with trio.move_on_after(10):
+        with trio.move_on_after(1):
             async for message in receiving_channel:
                 logger.debug(receiving_channel.statistics())
                 buses.update(message)
@@ -35,16 +35,29 @@ async def collect_all_data(sending_channel, receiving_channel):
         await trio.sleep(0)
 
 
-async def talk_to_browser(receiving_channel, request):
+async def listen_browser(ws):
+    while True:
+        try:
+            message = await ws.get_message()
+        except ConnectionClosed:
+            logger.debug('Connection from browser left')
+            return
+        logger.info(message)
+        await trio.sleep(0)
+
+
+async def talk_to_browser(receiving_channel, nursery, request):
     # global buses
     ws = await request.accept()
+    nursery.start_soon(listen_browser, ws)
+
     # buses = {}
     while True:
         try:
             async for message in receiving_channel:
                 await ws.send_message(message)
         except ConnectionClosed:
-            break
+            pass
         await trio.sleep(0)
 
 
@@ -72,7 +85,7 @@ async def receive_coords_data(sending_channel, request):
 
 
 async def main():
-    logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+    logging.basicConfig(level=logging.INFO, format=FORMAT)
     (
         send_to_processing,
         recieve_for_processing
@@ -84,9 +97,6 @@ async def main():
     receive_func = partial(
         receive_coords_data, send_to_processing
     )
-    sender_func = partial(
-        talk_to_browser, recieve_for_render
-    )
     serve_recieve = partial(
         serve_websocket,
         receive_func,
@@ -94,15 +104,19 @@ async def main():
         8080,
         ssl_context=None
     )
-    serve_sending = partial(
-        serve_websocket,
-        sender_func,
-        '127.0.0.1',
-        8000,
-        ssl_context=None
-    )
 
     async with trio.open_nursery() as nursery:
+        sender_func = partial(
+            talk_to_browser, recieve_for_render, nursery
+        )
+        serve_sending = partial(
+            serve_websocket,
+            sender_func,
+            '127.0.0.1',
+            8000,
+            ssl_context=None
+        )
+
         nursery.start_soon(
             serve_recieve
         )
