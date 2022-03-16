@@ -1,4 +1,5 @@
 import json
+import os
 from contextlib import suppress
 from sys import stderr
 
@@ -8,24 +9,39 @@ from trio_websocket import open_websocket_url
 SEND_TIMEOUT = 10
 
 
-async def main():
-    with open('156.json', encoding='utf-8') as fp:
-        route_156 = json.load(fp)
+def load_routes(directory_path='routes'):
+    for filename in os.listdir(directory_path):
+        if filename.endswith('.json'):
+            filepath = os.path.join(directory_path, filename)
+            with open(filepath, 'r', encoding='utf-8') as file:
+                yield json.load(file)
+
+
+async def run_bus(url, bus_id, route):
     try:
-        async with open_websocket_url('ws://127.0.0.1:8000') as ws:
-            for coordinates in route_156['coordinates']:
+        async with open_websocket_url(url) as ws:
+            for coordinates in route['coordinates']:
                 message = json.dumps({
-                    'busId': route_156['name'],
+                    'busId': bus_id,
                     'lat': coordinates[0],
                     'lng': coordinates[1],
-                    'route': route_156['name']
-                })
+                    'route': route['name']
+                }, ensure_ascii=False)
                 await ws.send_message(message)
                 await trio.sleep(SEND_TIMEOUT)
-            # message = await ws.get_message()
-            # print('bubub')
     except OSError as ose:
         print(f'Connection attempt failed {ose}', file=stderr)
+
+
+async def main():
+    async with trio.open_nursery() as nursery:
+        for route in load_routes():
+            nursery.start_soon(
+                run_bus,
+                'ws://127.0.0.1:8000',
+                route['name'],
+                route
+            )
 
 
 if __name__ == '__main__':
