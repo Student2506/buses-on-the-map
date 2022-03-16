@@ -38,7 +38,7 @@ async def main():
         for route in load_routes():
             nursery.start_soon(
                 run_bus,
-                'ws://127.0.0.1:8000',
+                'ws://127.0.0.1:8080',
                 route['name'],
                 route
             )
