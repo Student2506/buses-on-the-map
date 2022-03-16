@@ -16,13 +16,25 @@ MESSAGE = {
 
 async def echo_server(request):
     ws = await request.accept()
-    while True:
+    with open('156.json', encoding='utf-8') as fp:
+        route_156 = json.load(fp)
+    # while True:
+    for coordinates in route_156['coordinates']:
         try:
             # message = await ws.get_message()
+            MESSAGE['buses'] = [
+                {
+                    'busId': route_156['name'],
+                    'lat': coordinates[0],
+                    'lng': coordinates[1],
+                    'route': route_156['name']
+                 }
+            ]
             message = json.dumps(MESSAGE)
             await ws.send_message(message)
         except ConnectionClosed:
             break
+        await trio.sleep(1)
 
 
 async def main():
