@@ -9,7 +9,7 @@ from random import choice, randint
 
 import asyncclick as click
 import trio
-from trio_websocket import ConnectionClosed, open_websocket_url, HandshakeError
+from trio_websocket import ConnectionClosed, HandshakeError, open_websocket_url
 
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 REFRESH_TIMEOUT = contextvars.ContextVar('refresh_timeout')
@@ -81,8 +81,8 @@ async def load_routes(directory_path='routes'):
 
 @click.command()
 @click.option('--server', default='127.0.0.1')
-@click.option('--routes_number', default=10)
-@click.option('--buses_per_route', default=40)
+@click.option('--routes_number', default=40)
+@click.option('--buses_per_route', default=10)
 @click.option('--websockets_number', default=5)
 @click.option('--emulator_id', default='')
 @click.option('--refresh_timeout', default=5)
