@@ -43,47 +43,52 @@ def is_inside(bounds, lat, lng):
             bounds['west_lng'] <= lng <= bounds['east_lng'])
 
 
-async def send_buses(ws, bounds):
-    pass
+async def send_buses(ws, bounds, receiving_channel):
+
+    async for message in receiving_channel:
+        current_position = {
+                'msgType': 'Buses',
+                'buses': [
+                    {
+                        'busId': bus_id,
+                        'lat': bus_params['lat'],
+                        'lng': bus_params['lng'],
+                        'route': bus_params['route']
+                    } for bus_id, bus_params in message.items()
+                    if is_inside(
+                        bounds,
+                        bus_params['lat'],
+                        bus_params['lng']
+                    )
+                ]
+            }
+        message = json.dumps(current_position)
+        try:
+            await ws.send_message(message)
+        except ConnectionClosed:
+            return
+        await trio.sleep(0)
 
 
 async def talk_to_browser(receiving_channel, nursery, request):
     ws = await request.accept()
     coords_sending, coords_receiving = trio.open_memory_channel(0)
     nursery.start_soon(listen_browser, ws, coords_sending)
-    new_coords = await coords_receiving.receive()
+    bounds = await coords_receiving.receive()
+    await send_buses(ws, bounds, receiving_channel)
+
     while True:
+
         try:
-            async for message in receiving_channel:
-                try:
-                    new_coords = coords_receiving.receive_nowait()
-                except trio.WouldBlock:
-                    pass
-                else:
-                    logger.info(new_coords)
-                current_position = {
-                        'msgType': 'Buses',
-                        'buses': [
-                            {
-                                'busId': bus_id,
-                                'lat': bus_params['lat'],
-                                'lng': bus_params['lng'],
-                                'route': bus_params['route']
-                            } for bus_id, bus_params in message.items()
-                            if is_inside(
-                                new_coords,
-                                bus_params['lat'],
-                                bus_params['lng']
-                            )
-                        ]
-                    }
-                message = json.dumps(current_position)
+            bounds = coords_receiving.receive_nowait()
+        except trio.WouldBlock:
+            continue
+        # except ConnectionClosed:
+    #         break
+        else:
+            send_buses(ws, bounds, receiving_channel)
+            logger.info(bounds)
 
-                await ws.send_message(message)
-            logger.debug('stop')
-
-        except ConnectionClosed:
-            pass
         await trio.sleep(0)
 
 
