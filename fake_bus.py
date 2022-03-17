@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from contextlib import suppress
 from itertools import cycle, islice
@@ -9,13 +10,22 @@ import trio
 from trio_websocket import open_websocket_url
 
 SEND_TIMEOUT = 1
+REFRESH_TIMEOUT = 1
+FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+
+async def send_updates(server_address, receive_channel):
+    async with open_websocket_url(f'ws://{server_address}:8080') as ws:
+        async for message in receive_channel:
+            await ws.send_message(message)
+            await trio.sleep(REFRESH_TIMEOUT)
 
 
 def generate_bus_id(route_id, bus_index):
     return f"{route_id}-{bus_index}"
 
 
-def load_routes(directory_path='routes'):
+async def load_routes(directory_path='routes'):
     for filename in os.listdir(directory_path):
         if filename.endswith('.json'):
             filepath = os.path.join(directory_path, filename)
@@ -36,32 +46,34 @@ def route_random_start(route):
     route['coordinates'] = route_current
 
 
-async def run_bus(url, bus_id, route):
+async def run_bus(url, bus_id, route, send_channel):
     route_random_start(route)
     try:
-        async with open_websocket_url(url) as ws:
-            for coordinates in cycle(route['coordinates']):
-                message = json.dumps({
-                    'busId': bus_id,
-                    'lat': coordinates[0],
-                    'lng': coordinates[1],
-                    'route': route['name']
-                }, ensure_ascii=False)
-                await ws.send_message(message)
-                await trio.sleep(SEND_TIMEOUT)
+        # async with open_websocket_url(url) as ws:
+        for coordinates in cycle(route['coordinates']):
+            message = json.dumps({
+                'busId': bus_id,
+                'lat': coordinates[0],
+                'lng': coordinates[1],
+                'route': route['name']
+            }, ensure_ascii=False)
+            await send_channel.send(message)
+            await trio.sleep(SEND_TIMEOUT)
     except OSError as ose:
         print(f'Connection attempt failed {ose}', file=stderr)
 
 
 async def main():
+    logging.basicConfig(level=logging.DEBUG, format=FORMAT)
     async with trio.open_nursery() as nursery:
+        send_channel, receive_channel = trio.open_memory_channel(0)
         for route in load_routes():
             for i in range(2):
                 nursery.start_soon(
                     run_bus,
-                    'ws://127.0.0.1:8080',
                     generate_bus_id(route["name"], str(i)),
-                    route
+                    route,
+                    send_channel
                 )
 
 
