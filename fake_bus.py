@@ -3,7 +3,7 @@ import logging
 import os
 from contextlib import suppress
 from itertools import cycle, islice
-from random import randint
+from random import choice, randint
 from sys import stderr
 
 import trio
@@ -65,16 +65,31 @@ async def run_bus(url, bus_id, route, send_channel):
 
 async def main():
     logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+    websockets_number = 5
+    server = '127.0.0.1'
+    channels = []
+    for _ in range(websockets_number):
+        (
+            send_channel,
+            receive_channel
+        ) = trio.open_memory_channel(0)
+        channels.append((send_channel, receive_channel))
     async with trio.open_nursery() as nursery:
-        send_channel, receive_channel = trio.open_memory_channel(0)
         for route in load_routes():
             for i in range(2):
+                send_channel, _ = choice(channels)
                 nursery.start_soon(
                     run_bus,
                     generate_bus_id(route["name"], str(i)),
                     route,
                     send_channel
                 )
+        for _, receive_channel in channels:
+            nursery.start_soon(
+                send_updates,
+                server,
+                receive_channel
+            )
 
 
 if __name__ == '__main__':
