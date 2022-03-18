@@ -3,20 +3,35 @@ import logging
 import os
 from contextlib import suppress
 from contextvars import ContextVar
+from functools import wraps
 from itertools import cycle, islice
 from random import choice, randint
 from sys import stderr
 
 import asyncclick as click
 import trio
-from trio_websocket import open_websocket_url
+from trio_websocket import open_websocket_url, ConnectionClosed, HandshakeError
 
 SEND_TIMEOUT = ContextVar('send_timeout', default=0.1)
 ROUTES_NUMBER = ContextVar('routes_number', default=10000)
 
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+logger = logging.getLogger(__name__)
 
 
+def relaunch_on_disconnect(async_function):
+    @wraps(async_function)
+    async def wrapper(*args, **kwargs):
+        while True:
+            try:
+                return await async_function(*args, **kwargs)
+            except (ConnectionClosed, HandshakeError):
+                logger.error('Connection closed')
+                await trio.sleep(10)
+    return wrapper
+
+
+@relaunch_on_disconnect
 async def send_updates(server_address, receive_channel):
     async with open_websocket_url(f'ws://{server_address}:8080') as ws:
         while True:
