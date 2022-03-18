@@ -29,7 +29,7 @@ async def get_buses(request):
                 'route': bus.get('route')
             } for bus in message})
 
-            logger.debug(message)
+            logger.debug(buses)
         except ConnectionClosed:
             break
         await trio.sleep(RECEIVE_TIMEOUT)
