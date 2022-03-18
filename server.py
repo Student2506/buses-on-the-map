@@ -13,6 +13,7 @@ SEND_TIMEOUT = 1
 
 
 buses = {}
+bounds = {}
 
 
 async def get_buses(request):
@@ -28,27 +29,17 @@ async def get_buses(request):
                 'lng': bus.get('lng'),
                 'route': bus.get('route')
             } for bus in message})
-
-            # logger.debug(buses)
         except ConnectionClosed:
             break
         await trio.sleep(RECEIVE_TIMEOUT)
 
 
 async def talk_to_browser(nursery, request):
-    global buses
+
     ws = await request.accept()
-    # async with trio.open_nursery() as nursery:
-    nursery.start_soon(listen_browser, ws)
     while True:
         try:
-            # await listen_browser(ws)
-            message = {
-                'msgType': 'Buses',
-                'buses': [bus for bus in buses.values()]
-            }
-            message = json.dumps(message)
-            await ws.send_message(message)
+            await listen_browser(ws)
         except ConnectionClosed:
             break
         await trio.sleep(SEND_TIMEOUT)
@@ -59,25 +50,37 @@ def is_inside(bounds, lat, lng):
             bounds['west_lng'] <= lng <= bounds['east_lng'])
 
 
-async def listen_browser(ws):
+async def send_buses(ws, bounds):
     global buses
-    logger.debug(f'And our ws is: {ws}')
-    while True:
-        try:
-            message = await ws.get_message()
-            message = json.loads(message)
-            if message.get('msgType') == 'newBounds':
-                bounds = message.get('data')
-                logger.debug(bounds)
-                bus_inside = [
-                    bus['busId'] for bus in buses.values()
-                    if is_inside(bounds, bus.get('lat'), bus.get('lng'))
-                ]
+    buses_bounded = [{
+        'busId': bus.get('busId'),
+        'lat': bus.get('lat'),
+        'lng': bus.get('lng'),
+        'route': bus.get('route')
+    } for bus in buses.values() if is_inside(
+        bounds, bus.get('lat'), bus.get('lng')
+    )]
+    message = {
+        'msgType': 'Buses',
+        'buses': buses_bounded
+    }
+    message = json.dumps(message)
+    await ws.send_message(message)
 
-                logger.debug(f'{len(bus_inside)} buses inside bounds')
-        except ConnectionClosed:
-            break
-        await trio.sleep(0)
+
+async def listen_browser(ws):
+    logger.debug(f'And our ws is: {ws}')
+    # while True:
+    message = {}
+    global bounds
+    with trio.move_on_after(SEND_TIMEOUT):
+        message = await ws.get_message()
+        message = json.loads(message)
+    if message.get('msgType') == 'newBounds':
+        bounds = message.get('data')
+        logger.debug(bounds)
+    await send_buses(ws, bounds)
+    await trio.sleep(0)
 
 
 async def main():
