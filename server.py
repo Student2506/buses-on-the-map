@@ -55,8 +55,8 @@ async def talk_to_browser(nursery, request):
 
 
 def is_inside(bounds, lat, lng):
-    return (bounds['lat'] <= lat <= bounds['lng'] and
-            bounds['lng'] <= lng <= bounds['lng'])
+    return (bounds['south_lat'] <= lat <= bounds['north_lat'] and
+            bounds['west_lng'] <= lng <= bounds['east_lng'])
 
 
 async def listen_browser(ws):
@@ -70,9 +70,10 @@ async def listen_browser(ws):
                 bounds = message.get('data')
                 logger.debug(bounds)
                 bus_inside = [
-                    bus for bus in buses if
-                    is_inside(bounds, bus.get('lat'), bus.get('lng'))
+                    bus['busId'] for bus in buses.values()
+                    if is_inside(bounds, bus.get('lat'), bus.get('lng'))
                 ]
+
                 logger.debug(f'{len(bus_inside)} buses inside bounds')
         except ConnectionClosed:
             break
