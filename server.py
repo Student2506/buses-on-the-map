@@ -8,7 +8,7 @@ from trio_websocket import ConnectionClosed, serve_websocket
 
 logger = logging.getLogger(__name__)
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-RECEIVE_TIMEOUT = 0.1
+RECEIVE_TIMEOUT = 1
 SEND_TIMEOUT = 1
 
 
@@ -29,17 +29,20 @@ async def get_buses(request):
                 'route': bus.get('route')
             } for bus in message})
 
-            logger.debug(buses)
+            # logger.debug(buses)
         except ConnectionClosed:
             break
         await trio.sleep(RECEIVE_TIMEOUT)
 
 
-async def talk_to_browser(request):
+async def talk_to_browser(nursery, request):
     global buses
     ws = await request.accept()
+    # async with trio.open_nursery() as nursery:
+    nursery.start_soon(listen_browser, ws)
     while True:
         try:
+            # await listen_browser(ws)
             message = {
                 'msgType': 'Buses',
                 'buses': [bus for bus in buses.values()]
@@ -51,17 +54,40 @@ async def talk_to_browser(request):
         await trio.sleep(SEND_TIMEOUT)
 
 
+async def listen_browser(ws):
+    logger.debug(f'And our ws is: {ws}')
+    while True:
+        try:
+            message = await ws.get_message()
+            message = json.loads(message)
+            if message.get('msgType') == 'newBounds':
+                logger.debug(message.get('data'))
+        except ConnectionClosed:
+            break
+        await trio.sleep(0)
+
+
 async def main():
     logging.basicConfig(level=logging.DEBUG, format=FORMAT)
-    get_buses_func = partial(
+    trio_websocket_logger = logging.getLogger(name='trio-websocket')
+    trio_websocket_logger.setLevel(logging.WARNING)
+    bus_receive_socket = partial(
         serve_websocket, get_buses, '127.0.0.1', 8080, ssl_context=None
     )
-    talk_to_browser_func = partial(
-        serve_websocket, talk_to_browser, '127.0.0.1', 8000, ssl_context=None
-    )
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(get_buses_func)
-        nursery.start_soon(talk_to_browser_func)
+        browser_func = partial(
+            talk_to_browser,
+            nursery
+        )
+        browser_socket = partial(
+            serve_websocket,
+            browser_func,
+            '127.0.0.1',
+            8000,
+            ssl_context=None
+        )
+        nursery.start_soon(bus_receive_socket)
+        nursery.start_soon(browser_socket)
 
 
 if __name__ == '__main__':
