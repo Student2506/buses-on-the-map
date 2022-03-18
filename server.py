@@ -8,7 +8,7 @@ from trio_websocket import ConnectionClosed, serve_websocket
 
 logger = logging.getLogger(__name__)
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-RECEIVE_TIMEOUT = 1
+RECEIVE_TIMEOUT = 0.1
 SEND_TIMEOUT = 1
 
 
@@ -22,12 +22,13 @@ async def get_buses(request):
         try:
             message = await ws.get_message()
             message = json.loads(message)
-            buses[message.get('busId')] = {
-                'busId': message.get('busId'),
-                'lat': message.get('lat'),
-                'lng': message.get('lng'),
-                'route': message.get('route')
-            }
+            buses.update({bus.get('busId'): {
+                'busId': bus.get('busId'),
+                'lat': bus.get('lat'),
+                'lng': bus.get('lng'),
+                'route': bus.get('route')
+            } for bus in message})
+
             logger.debug(message)
         except ConnectionClosed:
             break
@@ -41,14 +42,7 @@ async def talk_to_browser(request):
         try:
             message = {
                 'msgType': 'Buses',
-                'buses': [
-                    {
-                        'busId': bus.get('busId'),
-                        'lat': bus.get('lat'),
-                        'lng': bus.get('lng'),
-                        'route': bus.get('route')
-                    } for bus in buses.values()
-                ]
+                'buses': [bus for bus in buses.values()]
             }
             message = json.dumps(message)
             await ws.send_message(message)
