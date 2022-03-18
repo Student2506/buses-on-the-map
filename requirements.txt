@@ -1,0 +1,4 @@
+trio==0.20.0
+trio-websocket==0.9.2
+asyncclick==8.0.3.2
+anyio==3.5.0
