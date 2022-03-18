@@ -54,14 +54,26 @@ async def talk_to_browser(nursery, request):
         await trio.sleep(SEND_TIMEOUT)
 
 
+def is_inside(bounds, lat, lng):
+    return (bounds['lat'] <= lat <= bounds['lng'] and
+            bounds['lng'] <= lng <= bounds['lng'])
+
+
 async def listen_browser(ws):
+    global buses
     logger.debug(f'And our ws is: {ws}')
     while True:
         try:
             message = await ws.get_message()
             message = json.loads(message)
             if message.get('msgType') == 'newBounds':
-                logger.debug(message.get('data'))
+                bounds = message.get('data')
+                logger.debug(bounds)
+                bus_inside = [
+                    bus for bus in buses if
+                    is_inside(bounds, bus.get('lat'), bus.get('lng'))
+                ]
+                logger.debug(f'{len(bus_inside)} buses inside bounds')
         except ConnectionClosed:
             break
         await trio.sleep(0)
