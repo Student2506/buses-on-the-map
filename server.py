@@ -1,6 +1,7 @@
 import json
 import logging
 from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from functools import partial
 
@@ -12,9 +13,7 @@ logger = logging.getLogger(__name__)
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 RECEIVE_TIMEOUT = 1
 SEND_TIMEOUT = 1
-
-
-buses = {}
+buses_var = ContextVar('buses', default={})
 
 
 @dataclass
@@ -46,15 +45,16 @@ class WindowBounds:
 
 
 async def get_buses(request):
-    global buses
     ws = await request.accept()
     while True:
         try:
             message = await ws.get_message()
             message = json.loads(message)
+            buses = buses_var.get()
             buses.update(
                 {bus.get('busId'): asdict(Bus(**bus)) for bus in message}
             )
+            buses_var.set(buses)
         except ConnectionClosed:
             break
         await trio.sleep(RECEIVE_TIMEOUT)
@@ -71,7 +71,6 @@ async def talk_to_browser(nursery, request):
 
     async def listen_browser(ws, bounds):
         logger.debug(f'And our ws is: {ws}')
-        # while True:
         message = {}
         with trio.move_on_after(SEND_TIMEOUT):
             message = await ws.get_message()
@@ -91,7 +90,7 @@ async def talk_to_browser(nursery, request):
 
 
 async def send_buses(ws, bounds):
-    global buses
+    buses = buses_var.get()
     buses_bounded = [
         asdict(Bus(**bus)) for bus in buses.values() if bounds.is_inside(
             bus.get('lat'), bus.get('lng')
@@ -118,7 +117,7 @@ async def main(bus_port, browser_port, verbose):
     }
     logging.basicConfig(level=logging_level.get(str(verbose)), format=FORMAT)
     trio_websocket_logger = logging.getLogger(name='trio-websocket')
-    trio_websocket_logger.setLevel(logging.WARNING)
+    trio_websocket_logger.setLevel(logging_level.get(str(verbose)))
     bus_receive_socket = partial(
         serve_websocket, get_buses, '127.0.0.1', bus_port, ssl_context=None
     )
