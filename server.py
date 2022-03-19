@@ -4,6 +4,7 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass
 from functools import partial
 
+import asyncclick as click
 import trio
 from trio_websocket import ConnectionClosed, serve_websocket
 
@@ -104,12 +105,22 @@ async def send_buses(ws, bounds):
     await ws.send_message(message)
 
 
-async def main():
-    logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+@click.command()
+@click.option('--bus_port', default=8080)
+@click.option('--browser_port', default=8000)
+@click.option('-v', '--verbose', count=True)
+async def main(bus_port, browser_port, verbose):
+    logging_level = {
+        '0': logging.ERROR,
+        '1': logging.WARNING,
+        '2': logging.INFO,
+        '3': logging.DEBUG
+    }
+    logging.basicConfig(level=logging_level.get(str(verbose)), format=FORMAT)
     trio_websocket_logger = logging.getLogger(name='trio-websocket')
     trio_websocket_logger.setLevel(logging.WARNING)
     bus_receive_socket = partial(
-        serve_websocket, get_buses, '127.0.0.1', 8080, ssl_context=None
+        serve_websocket, get_buses, '127.0.0.1', bus_port, ssl_context=None
     )
     async with trio.open_nursery() as nursery:
         browser_func = partial(
@@ -120,7 +131,7 @@ async def main():
             serve_websocket,
             browser_func,
             '127.0.0.1',
-            8000,
+            browser_port,
             ssl_context=None
         )
         nursery.start_soon(bus_receive_socket)
@@ -129,4 +140,4 @@ async def main():
 
 if __name__ == '__main__':
     with suppress(KeyboardInterrupt):
-        trio.run(main)
+        main(_anyio_backend="trio")
