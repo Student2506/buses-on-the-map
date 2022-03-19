@@ -1,7 +1,7 @@
 import json
 import logging
 from contextlib import suppress
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from functools import partial
 
 import trio
@@ -37,6 +37,12 @@ class WindowBounds:
         return (self.south_lat <= lat <= self.north_lat and
                 self.west_lng <= lng <= self.east_lng)
 
+    def update(self, south_lat, north_lat, west_lng, east_lng):
+        self.south_lat = south_lat
+        self.north_lat = north_lat
+        self.west_lng = west_lng
+        self.east_lng = east_lng
+
 
 async def get_buses(request):
     global buses
@@ -54,26 +60,30 @@ async def get_buses(request):
 
 
 async def talk_to_browser(nursery, request):
-    bounds = None
     ws = await request.accept()
+    message = await ws.get_message()
+    message = json.loads(message)
+    if message.get('msgType') == 'newBounds':
+        bounds = WindowBounds(**message.get('data'))
+    else:
+        return
 
-    async def listen_browser(ws):
+    async def listen_browser(ws, bounds):
         logger.debug(f'And our ws is: {ws}')
         # while True:
         message = {}
-        nonlocal bounds
         with trio.move_on_after(SEND_TIMEOUT):
             message = await ws.get_message()
             message = json.loads(message)
         if message.get('msgType') == 'newBounds':
-            bounds = WindowBounds(**message.get('data'))
+            bounds.update(**message.get('data'))
             logger.debug(bounds)
         await send_buses(ws, bounds)
         await trio.sleep(0)
 
     while True:
         try:
-            await listen_browser(ws)
+            await listen_browser(ws, bounds)
         except ConnectionClosed:
             break
         await trio.sleep(SEND_TIMEOUT)
