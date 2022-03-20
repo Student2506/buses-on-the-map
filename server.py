@@ -49,11 +49,22 @@ async def get_buses(request):
     while True:
         try:
             message = await ws.get_message()
-            message = json.loads(message)
+            try:
+                message = json.loads(message)
+            except ValueError as e:
+                await ws.aclose(
+                    code=1003, reason=f'Requires valid JSON: {str(e)}'
+                )
+                return
             buses = buses_var.get()
-            buses.update(
-                {bus.get('busId'): asdict(Bus(**bus)) for bus in message}
-            )
+            try:
+                buses.update(
+                    {bus.get('busId'): asdict(Bus(**bus)) for bus in message}
+                )
+            except AttributeError:
+                await ws.aclose(code=1003, reason='Requires busId specified')
+                return
+
             buses_var.set(buses)
         except ConnectionClosed:
             break
