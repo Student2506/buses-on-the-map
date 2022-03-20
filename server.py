@@ -1,165 +1,166 @@
 import json
 import logging
 from contextlib import suppress
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass
 from functools import partial
 
+import asyncclick as click
 import trio
 from trio_websocket import ConnectionClosed, serve_websocket
 
-FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logger = logging.getLogger(__name__)
+FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+RECEIVE_TIMEOUT = 1
+SEND_TIMEOUT = 1
+buses_var = ContextVar('buses', default={})
 
 
-async def collect_all_data(sending_channel, receiving_channel):
-    buses = {}
-    message = ''
+@dataclass
+class Bus:
+    """Keeps information about buses on map"""
+    busId: str
+    lat: float
+    lng: float
+    route: str
+
+
+@dataclass
+class WindowBounds:
+    """Keeps info about current browser windows"""
+    south_lat: float
+    north_lat: float
+    west_lng: float
+    east_lng: float
+
+    def is_inside(self, lat, lng):
+        return (self.south_lat <= lat <= self.north_lat and
+                self.west_lng <= lng <= self.east_lng)
+
+    def update(self, south_lat, north_lat, west_lng, east_lng):
+        self.south_lat = south_lat
+        self.north_lat = north_lat
+        self.west_lng = west_lng
+        self.east_lng = east_lng
+
+
+async def get_buses(request):
+    ws = await request.accept()
     while True:
-        # with trio.move_on_after(.01):
-        async for message in receiving_channel:
-            logger.debug(receiving_channel.statistics())
-            buses.update(message)
+        try:
+            message = await ws.get_message()
             try:
-                sending_channel.send_nowait(buses)
-            except trio.WouldBlock:
-                pass
-        await trio.sleep(0)
+                message = json.loads(message)
+            except ValueError as e:
+                await ws.aclose(
+                    code=1003, reason=f'Requires valid JSON: {str(e)}'
+                )
+                return
+            buses = buses_var.get()
+            try:
+                buses.update(
+                    {bus.get('busId'): asdict(Bus(**bus)) for bus in message}
+                )
+            except AttributeError:
+                await ws.aclose(code=1003, reason='Requires busId specified')
+                return
 
-
-async def listen_browser(ws, coords_sending):
-    while True:
-        try:
-            message = await ws.get_message()
-        except ConnectionClosed:
-            logger.debug('Connection from browser left')
-            return
-        message = json.loads(message)
-        if message.get('msgType', None) == 'newBounds':
-            await coords_sending.send(message.get('data'))
-        await trio.sleep(0)
-
-
-def is_inside(bounds, lat, lng):
-    return (bounds['south_lat'] <= lat <= bounds['north_lat'] and
-            bounds['west_lng'] <= lng <= bounds['east_lng'])
-
-
-async def send_buses(ws, bounds, receiving_channel):
-
-    async for message in receiving_channel:
-        current_position = {
-                'msgType': 'Buses',
-                'buses': [
-                    {
-                        'busId': bus_id,
-                        'lat': bus_params['lat'],
-                        'lng': bus_params['lng'],
-                        'route': bus_params['route']
-                    } for bus_id, bus_params in message.items()
-                    if is_inside(
-                        bounds,
-                        bus_params['lat'],
-                        bus_params['lng']
-                    )
-                ]
-            }
-        message = json.dumps(current_position)
-        try:
-            await ws.send_message(message)
-        except ConnectionClosed:
-            return
-        await trio.sleep(0)
-
-
-async def talk_to_browser(receiving_channel, nursery, request):
-    ws = await request.accept()
-    coords_sending, coords_receiving = trio.open_memory_channel(0)
-    nursery.start_soon(listen_browser, ws, coords_sending)
-    bounds = await coords_receiving.receive()
-    await send_buses(ws, bounds, receiving_channel)
-
-    while True:
-
-        try:
-            bounds = coords_receiving.receive_nowait()
-        except trio.WouldBlock:
-            continue
-        # except ConnectionClosed:
-    #         break
-        else:
-            send_buses(ws, bounds, receiving_channel)
-            logger.info(bounds)
-
-        await trio.sleep(0)
-
-
-async def receive_coords_data(sending_channel, request):
-    sending_channel = sending_channel.clone()
-    buses = {}
-    ws = await request.accept()
-    while True:
-        try:
-            message = await ws.get_message()
-
-            bus = json.loads(message)
-            buses[bus.get('busId')] = {
-                'lat': bus.get('lat'),
-                'lng': bus.get('lng'),
-                'route': str(bus.get('route'))
-            }
-            await sending_channel.send(buses)
-            logger.debug(f'Coords qty: {len(buses)}')
+            buses_var.set(buses)
         except ConnectionClosed:
             break
+        await trio.sleep(RECEIVE_TIMEOUT)
+
+
+async def talk_to_browser(nursery, request):
+    ws = await request.accept()
+    message = await ws.get_message()
+    try:
+        message = json.loads(message)
+    except ValueError as e:
+        await ws.aclose(code=1003, reason=f'Requires valid JSON: {str(e)}')
+        return
+    if message.get('msgType') == 'newBounds':
+        bounds = WindowBounds(**message.get('data'))
+    else:
+        await ws.aclose(code=1003, reason='Requires msgType specified')
+        return
+
+    async def listen_browser(ws, bounds):
+        logger.debug(f'And our ws is: {ws}')
+        message = {}
+        try:
+            with trio.move_on_after(SEND_TIMEOUT):
+                message = await ws.get_message()
+                message = json.loads(message)
+        except ValueError as e:
+            await ws.aclose(code=1003, reason=f'Requires valid JSON: {str(e)}')
+            return
+        if message:
+            if message.get('msgType') == 'newBounds':
+                bounds.update(**message.get('data'))
+                logger.debug(bounds)
+            else:
+                await ws.aclose(code=1003, reason='Requires msgType specified')
+                return
+        await send_buses(ws, bounds)
         await trio.sleep(0)
 
+    while True:
+        try:
+            await listen_browser(ws, bounds)
+        except ConnectionClosed:
+            break
+        await trio.sleep(SEND_TIMEOUT)
 
-async def main():
-    logging.basicConfig(level=logging.INFO, format=FORMAT)
+
+async def send_buses(ws, bounds):
+    buses = buses_var.get()
+    buses_bounded = [
+        asdict(Bus(**bus)) for bus in buses.values() if bounds.is_inside(
+            bus.get('lat'), bus.get('lng')
+        )
+    ]
+    message = {
+        'msgType': 'Buses',
+        'buses': buses_bounded
+    }
+    message = json.dumps(message)
+    await ws.send_message(message)
+
+
+@click.command()
+@click.option('--bus_port', default=8080)
+@click.option('--browser_port', default=8000)
+@click.option('-v', '--verbose', count=True)
+async def main(bus_port, browser_port, verbose):
+    logging_level = {
+        '0': logging.ERROR,
+        '1': logging.WARNING,
+        '2': logging.INFO,
+        '3': logging.DEBUG
+    }
+    logging.basicConfig(level=logging_level.get(str(verbose)), format=FORMAT)
+    trio_websocket_logger = logging.getLogger(name='trio-websocket')
+    trio_websocket_logger.setLevel(logging_level.get(str(verbose)))
+    bus_receive_socket = partial(
+        serve_websocket, get_buses, '127.0.0.1', bus_port, ssl_context=None
+    )
     async with trio.open_nursery() as nursery:
-        (
-            send_to_processing,
-            recieve_for_processing
-        ) = trio.open_memory_channel(0)
-        (
-            send_for_render,
-            recieve_for_render
-        ) = trio.open_memory_channel(0)
-        async with send_for_render, recieve_for_render, send_to_processing,\
-                recieve_for_processing:
-            receive_func = partial(
-                receive_coords_data, send_to_processing.clone()
-            )
-            serve_recieve = partial(
-                serve_websocket,
-                receive_func,
-                '127.0.0.1',
-                8080,
-                ssl_context=None
-            )
-            sender_func = partial(
-                talk_to_browser, recieve_for_render.clone(), nursery
-            )
-            serve_sending = partial(
-                serve_websocket,
-                sender_func,
-                '127.0.0.1',
-                8000,
-                ssl_context=None
-            )
-
-            nursery.start_soon(
-                serve_recieve
-            )
-            nursery.start_soon(
-                serve_sending
-            )
-            nursery.start_soon(
-                collect_all_data,
-                send_for_render.clone(),
-                recieve_for_processing.clone()
-            )
+        browser_func = partial(
+            talk_to_browser,
+            nursery
+        )
+        browser_socket = partial(
+            serve_websocket,
+            browser_func,
+            '127.0.0.1',
+            browser_port,
+            ssl_context=None
+        )
+        nursery.start_soon(bus_receive_socket)
+        nursery.start_soon(browser_socket)
 
 
 if __name__ == '__main__':
     with suppress(KeyboardInterrupt):
-        trio.run(main)
+        main(_anyio_backend="trio")
