@@ -15,16 +15,17 @@ pip install -r requirements.txt
 
 - Запустите сервер
 ```
-python server.py 
+python server.py
+```
 дополнительные ключи:
 * --bus_port (default=8080)
 * --browser_port (default=8000)
 * '-v', '--verbose'
-```
 
 - Запустите генератор перемещения автобусов
 ```
 python fake_bus.py
+```
 дополнительные ключи:
 * --server (default='127.0.0.1')
 * --routes_number (default=10000)
@@ -33,7 +34,6 @@ python fake_bus.py
 * --emulator_id (default='')
 * --refresh_timeout (default=0.1)
 * '-v', '--verbose'
-```
 
 
 - Откройте в браузере файл index.html
