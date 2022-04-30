@@ -1,6 +1,6 @@
+import glob
 import json
 import logging
-import os
 from contextlib import suppress
 from contextvars import ContextVar
 from functools import wraps
@@ -50,15 +50,12 @@ def generate_bus_id(route_id, bus_index):
 
 
 async def load_routes(directory_path='routes'):
-    files_count = len([name for name in os.listdir(directory_path) if
-                      name.endswith('.json')])
+    routes = glob.glob(f'{directory_path}/*.json')
     routes_number = ROUTES_NUMBER.get()
-    routes_number = min(files_count, routes_number)
-    for filename in os.listdir(directory_path)[:routes_number]:
-        if filename.endswith('.json'):
-            filepath = os.path.join(directory_path, filename)
-            with open(filepath, 'r', encoding='utf-8') as file:
-                yield json.load(file)
+    routes_number = min(len(routes), routes_number)
+    for filepath in routes[:routes_number]:
+        with open(filepath, 'r', encoding='utf-8') as file:
+            yield json.load(file)
 
 
 def route_random_start(route):
