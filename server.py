@@ -46,27 +46,28 @@ class WindowBounds:
 
 async def get_buses(request):
     ws = await request.accept()
-    while True:
-        message = await ws.get_message()
-        try:
-            message = json.loads(message)
-        except ValueError as e:
-            await ws.aclose(
-                code=1003, reason=f'Requires valid JSON: {str(e)}'
-            )
-            return
-        buses = buses_var.get()
-        try:
-            buses.update(
-                {bus.get('busId'): asdict(Bus(**bus)) for bus in message}
-            )
-        except AttributeError:
-            await ws.aclose(code=1003, reason='Requires busId specified')
-            return
+    with suppress(ConnectionClosed):
+        while True:
+            message = await ws.get_message()
+            try:
+                message = json.loads(message)
+            except ValueError as e:
+                await ws.aclose(
+                    code=1003, reason=f'Requires valid JSON: {str(e)}'
+                )
+                return
+            buses = buses_var.get()
+            try:
+                buses.update(
+                    {bus.get('busId'): asdict(Bus(**bus)) for bus in message}
+                )
+            except AttributeError:
+                await ws.aclose(code=1003, reason='Requires busId specified')
+                return
 
-        buses_var.set(buses)
+            buses_var.set(buses)
 
-        await trio.sleep(RECEIVE_TIMEOUT)
+            await trio.sleep(RECEIVE_TIMEOUT)
 
 
 async def talk_to_browser(request):
@@ -103,8 +104,8 @@ async def talk_to_browser(request):
         await send_buses(ws, bounds)
         await trio.sleep(0)
 
-    while True:
-        with suppress(ConnectionClosed):
+    with suppress(ConnectionClosed):
+        while True:
             await listen_browser(ws, bounds)
         await trio.sleep(SEND_TIMEOUT)
 
