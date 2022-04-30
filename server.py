@@ -47,27 +47,25 @@ class WindowBounds:
 async def get_buses(request):
     ws = await request.accept()
     while True:
+        message = await ws.get_message()
         try:
-            message = await ws.get_message()
-            try:
-                message = json.loads(message)
-            except ValueError as e:
-                await ws.aclose(
-                    code=1003, reason=f'Requires valid JSON: {str(e)}'
-                )
-                return
-            buses = buses_var.get()
-            try:
-                buses.update(
-                    {bus.get('busId'): asdict(Bus(**bus)) for bus in message}
-                )
-            except AttributeError:
-                await ws.aclose(code=1003, reason='Requires busId specified')
-                return
+            message = json.loads(message)
+        except ValueError as e:
+            await ws.aclose(
+                code=1003, reason=f'Requires valid JSON: {str(e)}'
+            )
+            return
+        buses = buses_var.get()
+        try:
+            buses.update(
+                {bus.get('busId'): asdict(Bus(**bus)) for bus in message}
+            )
+        except AttributeError:
+            await ws.aclose(code=1003, reason='Requires busId specified')
+            return
 
-            buses_var.set(buses)
-        except ConnectionClosed:
-            break
+        buses_var.set(buses)
+
         await trio.sleep(RECEIVE_TIMEOUT)
 
 
@@ -106,10 +104,8 @@ async def talk_to_browser(request):
         await trio.sleep(0)
 
     while True:
-        try:
+        with suppress(ConnectionClosed):
             await listen_browser(ws, bounds)
-        except ConnectionClosed:
-            break
         await trio.sleep(SEND_TIMEOUT)
 
 
@@ -145,14 +141,11 @@ async def main(bus_port, browser_port, verbose):
     bus_receive_socket = partial(
         serve_websocket, get_buses, '127.0.0.1', bus_port, ssl_context=None
     )
+    browser_socket = partial(
+        serve_websocket, talk_to_browser, '127.0.0.1', browser_port,
+        ssl_context=None
+    )
     async with trio.open_nursery() as nursery:
-        browser_socket = partial(
-            serve_websocket,
-            talk_to_browser,
-            '127.0.0.1',
-            browser_port,
-            ssl_context=None
-        )
         nursery.start_soon(bus_receive_socket)
         nursery.start_soon(browser_socket)
 
