@@ -71,7 +71,7 @@ async def get_buses(request):
         await trio.sleep(RECEIVE_TIMEOUT)
 
 
-async def talk_to_browser(nursery, request):
+async def talk_to_browser(request):
     ws = await request.accept()
     message = await ws.get_message()
     try:
@@ -146,13 +146,9 @@ async def main(bus_port, browser_port, verbose):
         serve_websocket, get_buses, '127.0.0.1', bus_port, ssl_context=None
     )
     async with trio.open_nursery() as nursery:
-        browser_func = partial(
-            talk_to_browser,
-            nursery
-        )
         browser_socket = partial(
             serve_websocket,
-            browser_func,
+            talk_to_browser,
             '127.0.0.1',
             browser_port,
             ssl_context=None
