@@ -100,12 +100,12 @@ async def main(
 ):
     SEND_TIMEOUT.set(refresh_timeout)
     logging_level = {
-        '0': logging.ERROR,
-        '1': logging.WARNING,
-        '2': logging.INFO,
-        '3': logging.DEBUG
+        0: logging.ERROR,
+        1: logging.WARNING,
+        2: logging.INFO,
+        3: logging.DEBUG
     }
-    logging.basicConfig(level=logging_level.get(str(verbose)), format=FORMAT)
+    logging.basicConfig(level=logging_level.get(verbose), format=FORMAT)
     channels = []
     for _ in range(websockets_number):
         (

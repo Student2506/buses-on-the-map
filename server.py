@@ -134,14 +134,14 @@ async def send_buses(ws, bounds):
 @click.option('-v', '--verbose', count=True)
 async def main(bus_port, browser_port, verbose):
     logging_level = {
-        '0': logging.ERROR,
-        '1': logging.WARNING,
-        '2': logging.INFO,
-        '3': logging.DEBUG
+        0: logging.ERROR,
+        1: logging.WARNING,
+        2: logging.INFO,
+        3: logging.DEBUG
     }
-    logging.basicConfig(level=logging_level.get(str(verbose)), format=FORMAT)
+    logging.basicConfig(level=logging_level.get(verbose), format=FORMAT)
     trio_websocket_logger = logging.getLogger(name='trio-websocket')
-    trio_websocket_logger.setLevel(logging_level.get(str(verbose)))
+    trio_websocket_logger.setLevel(logging_level.get(verbose))
     bus_receive_socket = partial(
         serve_websocket, get_buses, '127.0.0.1', bus_port, ssl_context=None
     )
