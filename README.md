@@ -19,9 +19,9 @@ python server.py
 ```
 дополнительные ключи:
 ```
-* --bus_port (default=8080)
-* --browser_port (default=8000)
-* '-v', '--verbose'
+--bus_port (default=8080)
+--browser_port (default=8000)
+'-v', '--verbose'
 ```
 
 - Запустите генератор перемещения автобусов
@@ -30,13 +30,13 @@ python fake_bus.py
 ```
 дополнительные ключи:
 ```
-* --server (default='127.0.0.1')
-* --routes_number (default=10000)
-* --buses_per_route (default=10)
-* --websockets_number (default=5)
-* --emulator_id (default='')
-* --refresh_timeout (default=0.1)
-* '-v', '--verbose'
+--server (default='127.0.0.1')
+--routes_number (default=10000)
+--buses_per_route (default=10)
+--websockets_number (default=5)
+--emulator_id (default='')
+--refresh_timeout (default=0.1)
+'-v', '--verbose'
 ```
 
 - Откройте в браузере файл index.html
