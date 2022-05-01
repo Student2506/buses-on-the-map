@@ -48,8 +48,8 @@ def generate_bus_id(route_id, bus_index):
     return f"{route_id}-{bus_index}"
 
 
-async def load_routes(routes_number, directory_path='routes'):
-    routes = islice(glob.glob(f'{directory_path}/*.json'), routes_number)
+async def load_routes(directory_path='routes'):
+    routes = glob.glob(f'{directory_path}/*.json')
     for filepath in routes:
         with open(filepath, 'r', encoding='utf-8') as file:
             yield json.load(file)
@@ -113,7 +113,10 @@ async def main(
         ) = trio.open_memory_channel(0)
         channels.append((send_channel, receive_channel))
     async with trio.open_nursery() as nursery:
-        async for route in load_routes(routes_number):
+        routes = []
+        async for route in load_routes():
+            routes.append(route)
+        for route in islice(routes, routes_number):
             for i in range(buses_per_route):
                 send_channel, _ = choice(channels)
                 nursery.start_soon(
