@@ -56,7 +56,8 @@ async def load_routes(directory_path='routes'):
 
 
 def route_random_start(route):
-    coords = route['coordinates']
+    rand_route = route.copy()
+    coords = rand_route['coordinates']
     checkpoint = randint(0, len(coords))
     first_part_of_route_coords = list(
         islice(coords, checkpoint)
@@ -65,19 +66,20 @@ def route_random_start(route):
         islice(coords, checkpoint, None)
     )
     route_current = second_part_of_route_coords + first_part_of_route_coords
-    route['coordinates'] = route_current
+    rand_route['coordinates'] = route_current
+    return rand_route
 
 
 async def run_bus(bus_id, route, send_channel):
-    route_random_start(route)
+    rand_route = route_random_start(route)
     try:
         # async with open_websocket_url(url) as ws:
-        for coordinates in cycle(route['coordinates']):
+        for coordinates in cycle(rand_route['coordinates']):
             message = {
                 'busId': bus_id,
                 'lat': coordinates[0],
                 'lng': coordinates[1],
-                'route': route['name']
+                'route': rand_route['name']
             }
             await send_channel.send(message)
             await trio.sleep(SEND_TIMEOUT.get())
