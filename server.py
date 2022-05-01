@@ -16,6 +16,10 @@ SEND_TIMEOUT = 1
 buses_var = ContextVar('buses', default={})
 
 
+class AbsentManadatoryElement(Exception):
+    pass
+
+
 @dataclass
 class Bus:
     """Keeps information about buses on map"""
@@ -71,20 +75,16 @@ async def get_buses(request):
 async def listen_browser(ws, bounds):
     logger.debug(f'And our ws is: {ws}')
     message = {}
-    try:
-        with trio.move_on_after(SEND_TIMEOUT):
-            message = await ws.get_message()
-            message = json.loads(message)
-    except ValueError as e:
-        await ws.aclose(code=1003, reason=f'Requires valid JSON: {str(e)}')
-        return
+    with trio.move_on_after(SEND_TIMEOUT):
+        message = await ws.get_message()
+        message = json.loads(message)
+
     if message:
         if message.get('msgType') == 'newBounds':
             bounds.update(**message.get('data'))
             logger.debug(bounds)
         else:
-            await ws.aclose(code=1003, reason='Requires msgType specified')
-            return
+            raise AbsentManadatoryElement()
     await send_buses(ws, bounds)
     await trio.sleep(0)
 
@@ -94,19 +94,19 @@ async def talk_to_browser(request):
     message = await ws.get_message()
     try:
         message = json.loads(message)
+        if message.get('msgType') == 'newBounds':
+            bounds = WindowBounds(**message.get('data'))
+        else:
+            raise AbsentManadatoryElement()
+
+        with suppress(ConnectionClosed):
+            while True:
+                await listen_browser(ws, bounds)
+            await trio.sleep(SEND_TIMEOUT)
     except ValueError as e:
         await ws.aclose(code=1003, reason=f'Requires valid JSON: {str(e)}')
-        return
-    if message.get('msgType') == 'newBounds':
-        bounds = WindowBounds(**message.get('data'))
-    else:
+    except AbsentManadatoryElement:
         await ws.aclose(code=1003, reason='Requires msgType specified')
-        return
-
-    with suppress(ConnectionClosed):
-        while True:
-            await listen_browser(ws, bounds)
-        await trio.sleep(SEND_TIMEOUT)
 
 
 async def send_buses(ws, bounds):
