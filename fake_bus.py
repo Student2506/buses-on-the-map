@@ -73,7 +73,6 @@ def route_random_start(route):
 async def run_bus(bus_id, route, send_channel):
     rand_route = route_random_start(route)
     try:
-        # async with open_websocket_url(url) as ws:
         for coordinates in cycle(rand_route['coordinates']):
             message = {
                 'busId': bus_id,

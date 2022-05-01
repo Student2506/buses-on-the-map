@@ -64,10 +64,29 @@ async def get_buses(request):
             except AttributeError:
                 await ws.aclose(code=1003, reason='Requires busId specified')
                 return
-
             buses_var.set(buses)
-
             await trio.sleep(RECEIVE_TIMEOUT)
+
+
+async def listen_browser(ws, bounds):
+    logger.debug(f'And our ws is: {ws}')
+    message = {}
+    try:
+        with trio.move_on_after(SEND_TIMEOUT):
+            message = await ws.get_message()
+            message = json.loads(message)
+    except ValueError as e:
+        await ws.aclose(code=1003, reason=f'Requires valid JSON: {str(e)}')
+        return
+    if message:
+        if message.get('msgType') == 'newBounds':
+            bounds.update(**message.get('data'))
+            logger.debug(bounds)
+        else:
+            await ws.aclose(code=1003, reason='Requires msgType specified')
+            return
+    await send_buses(ws, bounds)
+    await trio.sleep(0)
 
 
 async def talk_to_browser(request):
@@ -83,26 +102,6 @@ async def talk_to_browser(request):
     else:
         await ws.aclose(code=1003, reason='Requires msgType specified')
         return
-
-    async def listen_browser(ws, bounds):
-        logger.debug(f'And our ws is: {ws}')
-        message = {}
-        try:
-            with trio.move_on_after(SEND_TIMEOUT):
-                message = await ws.get_message()
-                message = json.loads(message)
-        except ValueError as e:
-            await ws.aclose(code=1003, reason=f'Requires valid JSON: {str(e)}')
-            return
-        if message:
-            if message.get('msgType') == 'newBounds':
-                bounds.update(**message.get('data'))
-                logger.debug(bounds)
-            else:
-                await ws.aclose(code=1003, reason='Requires msgType specified')
-                return
-        await send_buses(ws, bounds)
-        await trio.sleep(0)
 
     with suppress(ConnectionClosed):
         while True:
