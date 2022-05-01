@@ -52,24 +52,23 @@ async def get_buses(request):
     ws = await request.accept()
     with suppress(ConnectionClosed):
         while True:
-            message = await ws.get_message()
             try:
+                message = await ws.get_message()
                 message = json.loads(message)
+                buses = buses_var.get()
+                buses.update(
+                    {bus.get('busId'): asdict(Bus(**bus)) for bus in message}
+                )
+                buses_var.set(buses)
+                await trio.sleep(RECEIVE_TIMEOUT)
             except ValueError as e:
                 await ws.aclose(
                     code=1003, reason=f'Requires valid JSON: {str(e)}'
                 )
-                return
-            buses = buses_var.get()
-            try:
-                buses.update(
-                    {bus.get('busId'): asdict(Bus(**bus)) for bus in message}
-                )
+                break
             except AttributeError:
                 await ws.aclose(code=1003, reason='Requires busId specified')
-                return
-            buses_var.set(buses)
-            await trio.sleep(RECEIVE_TIMEOUT)
+                break
 
 
 async def validate_incoming_message(message, bounds):
