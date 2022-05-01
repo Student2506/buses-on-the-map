@@ -72,12 +72,8 @@ async def get_buses(request):
             await trio.sleep(RECEIVE_TIMEOUT)
 
 
-async def listen_browser(ws, bounds):
-    logger.debug(f'And our ws is: {ws}')
-    message = {}
-    with trio.move_on_after(SEND_TIMEOUT):
-        message = await ws.get_message()
-        message = json.loads(message)
+async def validate_incoming_message(message, bounds):
+    message = json.loads(message)
 
     if message:
         if message.get('msgType') == 'newBounds':
@@ -85,6 +81,24 @@ async def listen_browser(ws, bounds):
             logger.debug(bounds)
         else:
             raise AbsentManadatoryElement()
+    return bounds
+
+
+async def validate(message):
+    message = json.loads(message)
+    if message.get('msgType') == 'newBounds':
+        bounds = WindowBounds(**message.get('data'))
+    else:
+        raise AbsentManadatoryElement()
+    return bounds
+
+
+async def listen_browser(ws, bounds):
+    logger.debug(f'And our ws is: {ws}')
+
+    with trio.move_on_after(SEND_TIMEOUT):
+        message = await ws.get_message()
+        bounds = await validate_incoming_message(message, bounds)
     await send_buses(ws, bounds)
     await trio.sleep(0)
 
@@ -93,12 +107,7 @@ async def talk_to_browser(request):
     ws = await request.accept()
     message = await ws.get_message()
     try:
-        message = json.loads(message)
-        if message.get('msgType') == 'newBounds':
-            bounds = WindowBounds(**message.get('data'))
-        else:
-            raise AbsentManadatoryElement()
-
+        bounds = await validate(message)
         with suppress(ConnectionClosed):
             while True:
                 await listen_browser(ws, bounds)
